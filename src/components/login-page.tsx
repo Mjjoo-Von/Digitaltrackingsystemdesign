@@ -106,10 +106,11 @@ export function LoginPage({ onSwitchToRegister }: LoginPageProps) {
 
         {/* Demo Credentials */}
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <p className="text-blue-900 mb-2">Demo Credentials:</p>
+          <p className="text-blue-900 mb-2">Getting Started:</p>
           <div className="space-y-1 text-blue-800">
-            <p>Student: student@school.edu / password123</p>
-            <p>Admin: admin@school.edu / admin123</p>
+            <p className="text-sm">1. Click &quot;Register here&quot; to create an account</p>
+            <p className="text-sm">2. Choose Student or Admin role</p>
+            <p className="text-sm">3. Use your credentials to log in</p>
           </div>
         </div>
       </div>

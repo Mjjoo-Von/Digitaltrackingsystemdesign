@@ -50,8 +50,19 @@ export function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
         formData.studentId,
         formData.role
       );
+      // Success - user will be redirected automatically
     } catch (err: any) {
-      setError(err.message || 'Failed to create account');
+      console.error('Registration error:', err);
+      // Provide more helpful error messages
+      let errorMessage = err.message || 'Failed to create account';
+      
+      if (errorMessage.includes('Failed to fetch')) {
+        errorMessage = 'Unable to connect to the server. The backend service may not be deployed yet. Please try again later.';
+      } else if (errorMessage.includes('already registered')) {
+        errorMessage = 'This email is already registered. Please try logging in instead.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

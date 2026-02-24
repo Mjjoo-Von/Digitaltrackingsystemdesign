@@ -23,7 +23,7 @@ interface IDRecord {
 }
 
 function AppContent() {
-  const { user, loading } = useAuth();
+  const auth = useAuth();
   const [authView, setAuthView] = useState<AuthView>('login');
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [selectedRecord, setSelectedRecord] = useState<IDRecord | null>(null);
@@ -41,7 +41,7 @@ function AppContent() {
     setCurrentPage('dashboard');
   };
 
-  if (loading) {
+  if (auth.loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -52,7 +52,7 @@ function AppContent() {
     );
   }
 
-  if (!user) {
+  if (!auth.user) {
     if (authView === 'login') {
       return <LoginPage onSwitchToRegister={() => setAuthView('register')} />;
     } else {
@@ -61,7 +61,7 @@ function AppContent() {
   }
 
   // Student views
-  if (user.role === 'student') {
+  if (auth.user.role === 'student') {
     if (currentPage === 'notifications') {
       return <NotificationsPage onBack={() => setCurrentPage('dashboard')} />;
     }
@@ -78,7 +78,7 @@ function AppContent() {
   }
 
   // Admin views
-  if (user.role === 'admin') {
+  if (auth.user.role === 'admin') {
     return (
       <>
         <AdminDashboard onEditRecord={handleEditRecord} />
