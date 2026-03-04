@@ -333,6 +333,319 @@ app.get("/make-server-d71c034e/claims", async (c) => {
   }
 });
 
+// ==================== LOST ID ENDPOINTS ====================
+
+// Submit lost ID report (student)
+app.post("/make-server-d71c034e/lost-id", async (c) => {
+  try {
+    const accessToken = c.req.header('Authorization')?.split(' ')[1];
+    if (!accessToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    
+    if (error || !user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const { studentId, reason, lastSeenDate, lastSeenLocation, additionalDetails } = await c.req.json();
+    
+    const idRecord = await kv.get(`id:${studentId}`);
+    if (!idRecord) {
+      return c.json({ error: 'ID record not found' }, 404);
+    }
+
+    if (idRecord.userId !== user.id) {
+      return c.json({ error: 'Forbidden' }, 403);
+    }
+
+    const reportId = `lost:${studentId}:${Date.now()}`;
+    const report = {
+      id: reportId,
+      studentId,
+      userId: user.id,
+      studentName: idRecord.studentName,
+      studentEmail: idRecord.studentEmail,
+      reason: reason || 'Lost',
+      lastSeenDate: lastSeenDate || null,
+      lastSeenLocation: lastSeenLocation || '',
+      additionalDetails: additionalDetails || '',
+      status: 'pending_review',
+      createdAt: new Date().toISOString(),
+    };
+
+    await kv.set(reportId, report);
+
+    // Update ID record to reflect lost status
+    const updatedRecord = {
+      ...idRecord,
+      lostReported: true,
+      lostReportedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      history: [
+        ...(idRecord.history || []),
+        {
+          status: 'lost_reported',
+          timestamp: new Date().toISOString(),
+          note: `Lost ID reported. Reason: ${reason || 'Lost'}`,
+        }
+      ]
+    };
+    await kv.set(`id:${studentId}`, updatedRecord);
+
+    // Notify admin (create an admin notification)
+    const adminNotifId = `notif:admin:lost:${studentId}:${Date.now()}`;
+    await kv.set(adminNotifId, {
+      type: 'lost_id_report',
+      title: 'Lost ID Report',
+      message: `Student ${idRecord.studentName} (${studentId}) has reported their ID as lost.`,
+      studentId,
+      userId: user.id,
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Notify student
+    const studentNotifId = `notif:${user.id}:lost:${Date.now()}`;
+    await kv.set(studentNotifId, {
+      userId: user.id,
+      type: 'lost_id_report',
+      title: 'Lost ID Report Submitted',
+      message: 'Your lost ID report has been submitted. The admin will review it shortly.',
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    return c.json({ report });
+  } catch (error) {
+    console.log(`Submit lost ID report error: ${error}`);
+    return c.json({ error: 'Internal server error during lost ID report submission' }, 500);
+  }
+});
+
+// Get all lost ID reports (admin only)
+app.get("/make-server-d71c034e/lost-ids", async (c) => {
+  try {
+    const accessToken = c.req.header('Authorization')?.split(' ')[1];
+    if (!accessToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    
+    if (error || !user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const userProfile = await kv.get(`user:${user.id}`);
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: 'Forbidden - Admin access required' }, 403);
+    }
+
+    const reports = await kv.getByPrefix('lost:');
+    const sorted = reports.sort((a: any, b: any) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    return c.json({ reports: sorted });
+  } catch (error) {
+    console.log(`Get lost ID reports error: ${error}`);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+// Update lost ID report status (admin only)
+app.put("/make-server-d71c034e/lost-id/:reportId", async (c) => {
+  try {
+    const accessToken = c.req.header('Authorization')?.split(' ')[1];
+    if (!accessToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    
+    if (error || !user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const userProfile = await kv.get(`user:${user.id}`);
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: 'Forbidden - Admin access required' }, 403);
+    }
+
+    const reportId = decodeURIComponent(c.req.param('reportId'));
+    const { status, adminNote } = await c.req.json();
+
+    const report = await kv.get(reportId);
+    if (!report) {
+      return c.json({ error: 'Report not found' }, 404);
+    }
+
+    const updatedReport = {
+      ...report,
+      status,
+      adminNote: adminNote || '',
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: userProfile.name,
+    };
+    await kv.set(reportId, updatedReport);
+
+    // Notify student
+    const notifId = `notif:${report.userId}:lostupdate:${Date.now()}`;
+    await kv.set(notifId, {
+      userId: report.userId,
+      type: 'lost_id_update',
+      title: 'Lost ID Report Updated',
+      message: `Your lost ID report has been updated to: ${status}. ${adminNote ? 'Note: ' + adminNote : ''}`,
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    return c.json({ report: updatedReport });
+  } catch (error) {
+    console.log(`Update lost ID report error: ${error}`);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+// ==================== REPLACE ID ENDPOINTS ====================
+
+// Initiate ID replacement (admin only)
+app.post("/make-server-d71c034e/replace-id", async (c) => {
+  try {
+    const accessToken = c.req.header('Authorization')?.split(' ')[1];
+    if (!accessToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    if (error || !user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const userProfile = await kv.get(`user:${user.id}`);
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: 'Forbidden - Admin access required' }, 403);
+    }
+
+    const { studentId, lostReportId, replacementFee, estimatedReadyDate, adminNote } = await c.req.json();
+
+    if (!studentId) {
+      return c.json({ error: 'studentId is required' }, 400);
+    }
+
+    const idRecord = await kv.get(`id:${studentId}`);
+    if (!idRecord) {
+      return c.json({ error: 'ID record not found' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const replacementId = `replace:${studentId}:${Date.now()}`;
+
+    // Store replacement record
+    const replacement = {
+      id: replacementId,
+      studentId,
+      userId: idRecord.userId,
+      studentName: idRecord.studentName,
+      studentEmail: idRecord.studentEmail,
+      lostReportId: lostReportId || null,
+      replacementFee: replacementFee || 0,
+      estimatedReadyDate: estimatedReadyDate || null,
+      adminNote: adminNote || '',
+      initiatedBy: userProfile.name,
+      initiatedAt: now,
+      status: 'processing',
+    };
+    await kv.set(replacementId, replacement);
+
+    // Reset the ID record back to processing and clear lost flags
+    const updatedRecord = {
+      ...idRecord,
+      status: 'processing',
+      lostReported: false,
+      replacementInitiated: true,
+      replacementInitiatedAt: now,
+      replacementId,
+      updatedAt: now,
+      history: [
+        ...(idRecord.history || []),
+        {
+          status: 'replacement_initiated',
+          timestamp: now,
+          note: `Replacement ID initiated by ${userProfile.name}. ${adminNote ? 'Note: ' + adminNote : ''}${replacementFee ? ' Fee: ₱' + replacementFee : ''}${estimatedReadyDate ? ' Est. ready: ' + new Date(estimatedReadyDate).toLocaleDateString() : ''}`,
+          updatedBy: userProfile.name,
+        }
+      ]
+    };
+    await kv.set(`id:${studentId}`, updatedRecord);
+
+    // Mark the lost report as resolved if provided
+    if (lostReportId) {
+      const lostReport = await kv.get(lostReportId);
+      if (lostReport) {
+        await kv.set(lostReportId, {
+          ...lostReport,
+          status: 'resolved',
+          resolvedAt: now,
+          resolvedBy: userProfile.name,
+          adminNote: adminNote || lostReport.adminNote || '',
+        });
+      }
+    }
+
+    // Notify student
+    const notifId = `notif:${idRecord.userId}:replace:${Date.now()}`;
+    await kv.set(notifId, {
+      userId: idRecord.userId,
+      type: 'replacement_initiated',
+      title: 'Replacement ID Initiated',
+      message: `Your replacement ID is now being processed.${replacementFee ? ' A replacement fee of ₱' + replacementFee + ' is required.' : ''}${estimatedReadyDate ? ' Estimated ready date: ' + new Date(estimatedReadyDate).toLocaleDateString() + '.' : ''}${adminNote ? ' Note: ' + adminNote : ''}`,
+      read: false,
+      createdAt: now,
+    });
+
+    return c.json({ replacement, idRecord: updatedRecord });
+  } catch (error) {
+    console.log(`Initiate replacement error: ${error}`);
+    return c.json({ error: 'Internal server error during replacement initiation' }, 500);
+  }
+});
+
+// Get replacement records (admin only)
+app.get("/make-server-d71c034e/replacements", async (c) => {
+  try {
+    const accessToken = c.req.header('Authorization')?.split(' ')[1];
+    if (!accessToken) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const supabase = getServiceClient();
+    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+    if (error || !user) {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const userProfile = await kv.get(`user:${user.id}`);
+    if (userProfile.role !== 'admin') {
+      return c.json({ error: 'Forbidden - Admin access required' }, 403);
+    }
+
+    const replacements = await kv.getByPrefix('replace:');
+    const sorted = replacements.sort((a: any, b: any) =>
+      new Date(b.initiatedAt).getTime() - new Date(a.initiatedAt).getTime()
+    );
+    return c.json({ replacements: sorted });
+  } catch (error) {
+    console.log(`Get replacements error: ${error}`);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
 // ==================== NOTIFICATIONS ENDPOINTS ====================
 
 // Get user notifications

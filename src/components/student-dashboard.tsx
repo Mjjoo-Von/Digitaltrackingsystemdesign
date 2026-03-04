@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from './auth-context';
 import { projectId } from '../utils/supabase/info';
 import schoolLogo from 'figma:asset/5763e9ff02364fda840f40312c6e0ef65765b303.png';
+import { LostIDModal } from './lost-id-modal';
 import { 
   IdCard, 
   Bell, 
@@ -11,7 +12,10 @@ import {
   Package,
   Calendar,
   HelpCircle,
-  User
+  User,
+  AlertTriangle,
+  ShieldAlert,
+  RefreshCw,
 } from 'lucide-react';
 
 interface IDRecord {
@@ -22,6 +26,10 @@ interface IDRecord {
   studentEmail: string;
   createdAt: string;
   updatedAt: string;
+  lostReported?: boolean;
+  lostReportedAt?: string;
+  replacementInitiated?: boolean;
+  replacementInitiatedAt?: string;
   history: Array<{
     status: string;
     timestamp: string;
@@ -39,6 +47,7 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
   const [idRecord, setIdRecord] = useState<IDRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [showLostIDModal, setShowLostIDModal] = useState(false);
 
   useEffect(() => {
     if (user?.studentId) {
@@ -98,6 +107,10 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
         return <Package className="w-6 h-6 text-green-600" />;
       case 'claimed':
         return <CheckCircle className="w-6 h-6 text-blue-600" />;
+      case 'lost_reported':
+        return <AlertTriangle className="w-6 h-6 text-red-600" />;
+      case 'replacement_initiated':
+        return <RefreshCw className="w-6 h-6 text-indigo-600" />;
       default:
         return <Clock className="w-6 h-6 text-gray-600" />;
     }
@@ -111,12 +124,16 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
         return 'bg-green-50 border-green-200 text-green-800';
       case 'claimed':
         return 'bg-blue-50 border-blue-200 text-blue-800';
+      case 'lost_reported':
+        return 'bg-red-50 border-red-200 text-red-800';
       default:
         return 'bg-gray-50 border-gray-200 text-gray-800';
     }
   };
 
   const getStatusLabel = (status: string) => {
+    if (status === 'lost_reported') return 'Lost (Reported)';
+    if (status === 'replacement_initiated') return 'Replacement Initiated';
     return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
@@ -191,6 +208,47 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
           </div>
         ) : idRecord ? (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            {/* Replacement-in-Progress Banner */}
+            {idRecord.replacementInitiated && !idRecord.lostReported && (
+              <div className="lg:col-span-3 bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-start gap-3">
+                <RefreshCw className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-indigo-800 font-semibold">Replacement ID In Progress</p>
+                  <p className="text-indigo-700 text-sm mt-0.5">
+                    Your replacement ID was initiated on{' '}
+                    {idRecord.replacementInitiatedAt
+                      ? new Date(idRecord.replacementInitiatedAt).toLocaleDateString('en-US', {
+                          year: 'numeric', month: 'long', day: 'numeric',
+                        })
+                      : 'recently'}
+                    . Your ID status has been reset to Processing and will move through the usual steps. Check notifications for fee and pickup details.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Lost ID Alert Banner */}
+            {idRecord.lostReported && (
+              <div className="lg:col-span-3 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-red-800 font-medium">Lost ID Report Active</p>
+                  <p className="text-red-700 text-sm mt-0.5">
+                    You have an active lost ID report submitted on{' '}
+                    {idRecord.lostReportedAt
+                      ? new Date(idRecord.lostReportedAt).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        })
+                      : 'recently'}
+                    . The ID office is reviewing your report and will contact you.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Main Status Card */}
             <div className="lg:col-span-2 space-y-6">
               {/* Status Overview */}
@@ -216,7 +274,7 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
                   </div>
                   <div className="w-full bg-gray-200 rounded-full h-3">
                     <div
-                      className="bg-blue-600 h-3 rounded-full transition-all duration-500"
+                      className={`h-3 rounded-full transition-all duration-500 ${idRecord.replacementInitiated ? 'bg-indigo-600' : 'bg-blue-600'}`}
                       style={{ width: `${getProgressPercentage(idRecord.status)}%` }}
                     ></div>
                   </div>
@@ -282,20 +340,31 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
                   {idRecord.history.map((entry, index) => (
                     <div key={index} className="flex gap-4">
                       <div className="flex-shrink-0">
-                        <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          entry.status === 'lost_reported'
+                            ? 'bg-red-100'
+                            : entry.status === 'replacement_initiated'
+                            ? 'bg-indigo-100'
+                            : 'bg-blue-100'
+                        }`}>
                           {getStatusIcon(entry.status)}
                         </div>
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
-                          <p className="text-gray-900">{getStatusLabel(entry.status)}</p>
+                          <p className={`font-medium ${
+                            entry.status === 'replacement_initiated' ? 'text-indigo-700' :
+                            entry.status === 'lost_reported' ? 'text-red-700' : 'text-gray-900'
+                          }`}>
+                            {getStatusLabel(entry.status)}
+                          </p>
                           <p className="text-gray-600">
                             {new Date(entry.timestamp).toLocaleDateString()}
                           </p>
                         </div>
-                        <p className="text-gray-600">{entry.note}</p>
+                        <p className="text-gray-600 text-sm">{entry.note}</p>
                         {entry.updatedBy && (
-                          <p className="text-gray-500 mt-1">Updated by: {entry.updatedBy}</p>
+                          <p className="text-gray-500 text-xs mt-1">Updated by: {entry.updatedBy}</p>
                         )}
                       </div>
                     </div>
@@ -324,6 +393,38 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
                     <HelpCircle className="w-5 h-5 text-blue-600" />
                     <span>Help & FAQ</span>
                   </button>
+
+                  {/* ID Issues section */}
+                  <div className="border-t border-gray-100 pt-3">
+                    <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-2 px-1">ID Issues</p>
+
+                    {/* Replacement in progress state */}
+                    {idRecord.replacementInitiated && !idRecord.lostReported ? (
+                      <div className="w-full flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                        <RefreshCw className="w-5 h-5 text-indigo-500 flex-shrink-0" />
+                        <div>
+                          <span className="text-indigo-700 font-medium text-sm block">Replacement In Progress</span>
+                          <span className="text-indigo-500 text-xs">Your replacement ID is being processed</span>
+                        </div>
+                      </div>
+                    ) : idRecord.lostReported ? (
+                      <div className="w-full flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
+                        <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                        <div>
+                          <span className="text-red-700 font-medium text-sm block">Lost ID Reported</span>
+                          <span className="text-red-500 text-xs">Awaiting review by ID office</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowLostIDModal(true)}
+                        className="w-full flex items-center gap-3 p-3 text-left text-red-600 hover:bg-red-50 border border-red-100 rounded-lg transition"
+                      >
+                        <AlertTriangle className="w-5 h-5 text-red-500" />
+                        <span>Report Lost ID</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -368,6 +469,18 @@ export function StudentDashboard({ onNavigate }: StudentDashboardProps) {
           </div>
         )}
       </main>
+
+      {/* Lost ID Modal */}
+      {showLostIDModal && user?.studentId && (
+        <LostIDModal
+          studentId={user.studentId}
+          onClose={() => setShowLostIDModal(false)}
+          onSuccess={() => {
+            setShowLostIDModal(false);
+            fetchIDRecord();
+          }}
+        />
+      )}
     </div>
   );
 }
